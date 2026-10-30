@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="so">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ganaan Burger - Nidaamka Muqayadda & Dalabka (Fast Food POS)</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fff7ed',
+                            100: '#ffedd5',
+                            200: '#fed7aa',
+                            300: '#fdba74',
+                            400: '#fb923c',
+                            500: '#f97316', // Vibrant Orange
+                            600: '#ea580c',
+                            700: '#c2410c',
+                            800: '#9a3412',
+                            900: '#7c2d12',
+                        },
+                        amberGold: '#F59E0B',
+                        darkBg: '#0f172a',
+                        cardBg: '#1e293b'
+                    },
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        serif: ['"Playfair Display"', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- React & Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Thermal Receipt Print Styles */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #printable-receipt, #printable-receipt * {
+                visibility: visible;
+            }
+            #printable-receipt {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                max-width: 80mm;
+                padding: 10px;
+                color: #000;
+                background: #fff;
+                box-shadow: none !important;
+                border: none !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        
+        /* Smooth Scroll & Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #f97316;
+        }
+
+        .food-card-hover {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .food-card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(249, 115, 22, 0.15), 0 8px 10px -6px rgba(249, 115, 22, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen antialiased selection:bg-orange-500 selection:text-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Sound Generator (Web Audio API - No external mp3 dependency) ---
+        const playBeep = (freq = 600, duration = 0.08) => {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + duration);
+            } catch (e) {
+                // Audio not allowed without prior interaction
+            }
+        };
+
+        const playOrderSuccessSound = () => {
+            playBeep(440, 0.1);
+            setTimeout(() => playBeep(554.37, 0.1), 120);
+            setTimeout(() => playBeep(659.25, 0.2), 240);
+        };
+
+        // --- Initial Categories ---
+        const INITIAL_CATEGORIES = [
+            { id: 'all', name: 'All Menu', name_so: 'Dhammaan', icon: '🍽️' },
+            { id: 'burgers', name: 'Burgers', name_so: 'Noocyada Burger-ka', icon: '🍔' },
+            { id: 'shawarma', name: 'Shawarma', name_so: 'Shuwarmo & Wraps', icon: '🌯' },
+            { id: 'drinks', name: 'Drinks & Juices', name_so: 'Cabitaanno & Qabow', icon: '🥤' },
+            { id: 'sides', name: 'Sides & Combos', name_so: 'Raacis & Faraas', icon: '🍟' },
+        ];
+
+        // --- Initial Products ---
+        const INITIAL_PRODUCTS = [
+            {
+                id: 1,
+                category: 'burgers',
+                name: 'Ganaan Signature Beef Burger',
+                name_so: 'Ganaan Burger Khaas Ah',
+                description: 'Double juicy Angus beef patties, melted cheddar, caramelized onions, crisp lettuce & Ganaan secret sauce.',
+                description_so: 'Hilib dibi oo jilicsan, jiis cheddar dhalaalaya, basal macaan oo guduudan iyo suugo qarsoodi ah oo Ganaan.',
+                price: 4.50,
+                rating: 4.9,
+                badge: 'BESTSELLER',
+                calories: 650,
+                prepTime: '12 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Extra Cheddar Cheese', name_so: 'Jiis Cheddar Dheeraad ah', price: 0.50 },
+                    { name: 'Double Patty', name_so: 'Hilib Labalaab ah', price: 1.80 },
+                    { name: 'Caramelized Onions', name_so: 'Basal Macaan oo Duban', price: 0.40 }
+                ]
+            },
+            {
+                id: 2,
+                category: 'burgers',
+                name: 'Crispy Zinger Chicken Burger',
+                name_so: 'Burger Digaag Qallalan',
+                description: 'Extra crispy spicy breaded chicken breast, jalapeños, garlic aioli & fresh brioche bun.',
+                description_so: 'Digaag subag ku qallalan oo basbaas leh, coleslaw jilicsan iyo suugo toom ku jirto brioche.',
+                price: 5.00,
+                rating: 4.8,
+                badge: 'SPICY 🔥',
+                calories: 680,
+                prepTime: '15 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1625813506062-0aeb1d7a094b?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Spicy Chipotle Sauce', name_so: 'Suugo Basbaas ah', price: 0.30 },
+                    { name: 'Extra Melted Cheese', name_so: 'Jiis Dheeraad ah', price: 0.50 }
+                ]
+            },
+            {
+                id: 3,
+                category: 'burgers',
+                name: 'Double Smash Cheeseburger',
+                name_so: 'Labalaab Jiis Burger',
+                description: 'Two thin smashed beef patties, double American cheese, dill pickles, diced onions & mustard sauce.',
+                description_so: 'Labo cad oo hilib duban ah, labo lakab oo jiis ah, khajaar dhanaan iyo suugo macaan.',
+                price: 6.50,
+                rating: 5.0,
+                badge: 'POPULAR',
+                calories: 820,
+                prepTime: '12 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Extra Cheese Slice', name_so: 'Jiis Dheeraad ah', price: 0.50 }
+                ]
+            },
+            {
+                id: 4,
+                category: 'burgers',
+                name: 'Smoky BBQ Bacon Burger',
+                name_so: 'Burger BBQ & Hilib Doofaar La\'aan ah',
+                description: 'Halal beef patty glazed in sweet smoky BBQ sauce with crisp golden onion rings & sharp cheddar.',
+                description_so: 'Hilib duban oo leh maraq BBQ qiiq caraf leh, halxidhaale basaleed iyo jiis macaan.',
+                price: 5.50,
+                rating: 4.7,
+                badge: 'NEW',
+                calories: 720,
+                prepTime: '14 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1594212699903-ec8a3eca50f5?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'BBQ Dip Cup', name_so: 'Suugo BBQ Koob ah', price: 0.40 }
+                ]
+            },
+            {
+                id: 5,
+                category: 'shawarma',
+                name: 'Ganaan Signature Chicken Shawarma',
+                name_so: 'Shuwarmo Digaag Ganaan',
+                description: 'Finely sliced marinated chicken roasted on spit, authentic garlic toum dip, pickles & crispy fries in saj wrap.',
+                description_so: 'Digaag caraf badan oo la dubay, suugo toom macaan, khajaar dhanaan iyo baradho lagu duubay roodhida saj.',
+                price: 3.50,
+                rating: 4.9,
+                badge: 'TOP CHOICE',
+                calories: 520,
+                prepTime: '8 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1561651823-34feb02250e4?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Extra Garlic Toum', name_so: 'Suugo Toom Dheeraad ah', price: 0.40 },
+                    { name: 'Melted Mozzarella Inside', name_so: 'Jiis Gudaha Lagu Daray', price: 0.60 }
+                ]
+            },
+            {
+                id: 6,
+                category: 'shawarma',
+                name: 'Premium Beef Shawarma Roll',
+                name_so: 'Shuwarmo Hilib Dibi Roll',
+                description: 'Slow-cooked tender beef strips, nutty tahini sauce, sumac red onions, fresh parsley and tomatoes.',
+                description_so: 'Hilib lo\'ad oo jilicsan oo lagu qooyay tahini, basal guduudan oo sumac leh, iyo yaanyo cusub.',
+                price: 4.20,
+                rating: 4.8,
+                badge: 'CHEF PICK',
+                calories: 580,
+                prepTime: '10 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1529006557810-274b9b2fc783?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Extra Tahini Sauce', name_so: 'Suugo Tahini ah', price: 0.40 },
+                    { name: 'Extra Beef Portion', name_so: 'Hilib Dheeraad ah', price: 1.20 }
+                ]
+            },
+            {
+                id: 7,
+                category: 'shawarma',
+                name: 'Mixed Shawarma Royal Platter',
+                name_so: 'Saxan Shuwarmo Isku Dhafan',
+                description: 'Generous platter with both chicken & beef shawarma, yellow saffron rice, garlic toum, hummus & fresh pita.',
+                description_so: 'Saxan weyn oo ay ku wada jiraan digaag iyo hilib, bariis caraf leh, toom, xumus iyo rooti pita.',
+                price: 7.00,
+                rating: 5.0,
+                badge: 'FEAST',
+                calories: 840,
+                prepTime: '15 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1633321702518-7feccafb94d5?auto=format&fit=crop&w=800&q=80',
+                addons: [
+                    { name: 'Extra Fresh Pita Bread', name_so: 'Rooti Pita Dheeraad ah', price: 0.50 }
+                ]
+            },
+            {
+                id: 8,
+                category: 'drinks',
+                name: 'Fresh Mango Juice (Casiir Cambe)',
+                name_so: 'Casiir Cambe Dabiici ah',
+                description: '100% freshly blended sweet tropical Somali mango nectar served ice-cold. Pure vitamin energy.',
+                description_so: 'Casiir cambe dabiici ah oo aad u qabow, macaan oo nafaqo badan.',
+                price: 2.00,
+                rating: 4.9,
+                badge: 'FRESH',
+                calories: 160,
+                prepTime: '3 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1546173159-315724a31696?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            },
+            {
+                id: 9,
+                category: 'drinks',
+                name: 'Vimto Ice Slush & Mint',
+                name_so: 'Vimto Baraf & Naacnaac',
+                description: 'Traditional iced Vimto with refreshing crushed ice, fresh mint leaves and a lime wedge.',
+                description_so: 'Vimto baraf la jajabiyay lagu daray caleenta naacnaaca iyo liin dhanaanta.',
+                price: 1.50,
+                rating: 4.7,
+                badge: 'COOL',
+                calories: 140,
+                prepTime: '3 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            },
+            {
+                id: 10,
+                category: 'drinks',
+                name: 'Traditional Somali Spiced Milk Tea (Shaah Caddiis)',
+                name_so: 'Shaah Caddiis Carfaya',
+                description: 'Authentic Somali tea brewed with cardamom pods, cinnamon, cloves, and rich sweet condensed milk.',
+                description_so: 'Shaah caddiis macaan oo lagu kariyay hayl, qorfe, dhego yare iyo caano jilicsan.',
+                price: 1.00,
+                rating: 4.9,
+                badge: 'WARM',
+                calories: 110,
+                prepTime: '4 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            },
+            {
+                id: 11,
+                category: 'drinks',
+                name: 'Creamy Oreo Milkshake',
+                name_so: 'Oreo Milkshake Macaan',
+                description: 'Vanilla cream milkshake blended with crunchy chocolate Oreos, crowned with whipped cream.',
+                description_so: 'Caano iyo jalaato la shiiday oo Oreo lagu daray, korkana kareem iyo shukulaato.',
+                price: 3.00,
+                rating: 4.8,
+                badge: 'SWEET',
+                calories: 420,
+                prepTime: '5 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            },
+            {
+                id: 12,
+                category: 'sides',
+                name: 'Crispy Golden French Fries',
+                name_so: 'Baradho Shiilan (Faraas)',
+                description: 'Crisp golden potato fries lightly salted, served with signature garlic mayo and tomato ketchup.',
+                description_so: 'Baradho shiilan oo qallalan oo lagu daray suugo toom iyo ketchup.',
+                price: 1.50,
+                rating: 4.6,
+                badge: 'CRISPY',
+                calories: 320,
+                prepTime: '6 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            },
+            {
+                id: 13,
+                category: 'sides',
+                name: 'Cheesy Loaded Dynamite Fries',
+                name_so: 'Faraas Jiis & Hilib Leh',
+                description: 'Loaded fries topped with piping hot cheddar sauce, seasoned ground beef, sliced jalapeños & spicy drizzle.',
+                description_so: 'Baradho shiilan oo korka lagaga shubay jiis cheddar dhalaalaya, hilib iyo suugo dynamite.',
+                price: 3.50,
+                rating: 4.9,
+                badge: 'MUST TRY',
+                calories: 540,
+                prepTime: '8 daqiiqo',
+                image: 'https://images.unsplash.com/photo-1585109649139-366815a0d713?auto=format&fit=crop&w=800&q=80',
+                addons: []
+            }
+        ];
+
+        // --- Initial Mock Orders ---
+        const INITIAL_ORDERS = [
+            {
+                id: 'ORD-8921',
+                customerName: 'Cabdiraxmaan Jaamac',
+                phone: '0615123456',
+                orderType: 'dine_in',
+                tableNumber: 'Miiska 03',
+                deliveryAddress: '',
+                items: [
+                    { name: 'Ganaan Signature Beef Burger', quantity: 2, price: 4.50, addons: ['Extra Cheddar Cheese'] },
+                    { name: 'Fresh Mango Juice (Casiir Cambe)', quantity: 2, price: 2.00, addons: [] }
+                ],
+                subtotal: 13.00,
+                tax: 0.65,
+                deliveryFee: 0.00,
+                total: 13.65,
+                paymentMethod: 'EVC_PLUS',
+                status: 'cooking', // 'pending', 'cooking', 'ready', 'completed'
+                time: '10:45 AM',
+                date: 'Maanta'
+            },
+            {
+                id: 'ORD-8920',
+                customerName: 'Aamina Maxamuud',
+                phone: '0619876543',
+                orderType: 'takeaway',
+                tableNumber: '',
+                deliveryAddress: '',
+                items: [
+                    { name: 'Ganaan Signature Chicken Shawarma', quantity: 2, price: 3.50, addons: ['Extra Garlic Toum'] },
+                    { name: 'Vimto Ice Slush & Mint', quantity: 1, price: 1.50, addons: [] }
+                ],
+                subtotal: 8.50,
+                tax: 0.42,
+                deliveryFee: 0.00,
+                total: 8.92,
+                paymentMethod: 'ZAAD',
+                status: 'ready',
+                time: '10:32 AM',
+                date: 'Maanta'
+            },
+            {
+                id: 'ORD-8919',
+                customerName: 'Xasan Sheekh Cali',
+                phone: '0618765432',
+                orderType: 'delivery',
+                tableNumber: '',
+                deliveryAddress: 'Wadada KM4, Muqdisho',
+                items: [
+                    { name: 'Double Smash Cheeseburger', quantity: 1, price: 6.50, addons: [] },
+                    { name: 'Cheesy Loaded Dynamite Fries', quantity: 1, price: 3.50, addons: [] },
+                    { name: 'Creamy Oreo Milkshake', quantity: 1, price: 3.00, addons: [] }
+                ],
+                subtotal: 13.00,
+                tax: 0.65,
+                deliveryFee: 1.50,
+                total: 15.15,
+                paymentMethod: 'EVC_PLUS',
+                status: 'completed',
+                time: '09:50 AM',
+                date: 'Maanta'
+            }
+        ];
+
+        // --- Main Component ---
+        function App() {
+            // State
+            const [products, setProducts] = useState(() => {
+                const saved = localStorage.getItem('ganaan_products');
+                return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+            });
+
+            const [orders, setOrders] = useState(() => {
+                const saved = localStorage.getItem('ganaan_orders');
+                return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+            });
+
+            const [cart, setCart] = useState(() => {
+                const saved = localStorage.getItem('ganaan_cart');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            const [activeTab, setActiveTab] = useState('menu'); // 'menu', 'kitchen', 'admin', 'database'
+            const [selectedCategory, setSelectedCategory] = useState('all');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [lang, setLang] = useState('so'); // 'so' or 'en'
+            const [currency, setCurrency] = useState('USD'); // 'USD' or 'SOS'
+            const [isCartOpen, setIsCartOpen] = useState(false);
+            const [customizingItem, setCustomizingItem] = useState(null);
+            const [selectedAddons, setSelectedAddons] = useState([]);
+            const [itemNotes, setItemNotes] = useState('');
+            const [receiptOrder, setReceiptOrder] = useState(null);
+
+            // Checkout state
+            const [customerName, setCustomerName] = useState('');
+            const [customerPhone, setCustomerPhone] = useState('');
+            const [orderType, setOrderType] = useState('dine_in'); // 'dine_in', 'takeaway', 'delivery'
+            const [tableNumber, setTableNumber] = useState('Miiska 01');
+            const [deliveryAddress, setDeliveryAddress] = useState('');
+            const [paymentMethod, setPaymentMethod] = useState('EVC_PLUS');
+            const [orderNote, setOrderNote] = useState('');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+            // Sync with LocalStorage
+            useEffect(() => {
+                localStorage.setItem('ganaan_products', JSON.stringify(products));
+            }, [products]);
+
+            useEffect(() => {
+                localStorage.setItem('ganaan_orders', JSON.stringify(orders));
+            }, [orders]);
+
+            useEffect(() => {
+                localStorage.setItem('ganaan_cart', JSON.stringify(cart));
+            }, [cart]);
+
+            // Exchange rate: $1 = 26,000 SOS
+            const formatPrice = (amount) => {
+                if (currency === 'SOS') {
+                    const sos = Math.round(amount * 26000);
+                    return `${sos.toLocaleString()} SOS`;
+                }
+                return `$${parseFloat(amount).toFixed(2)}`;
+            };
+
+            // Filtered Products
+            const filteredProducts = useMemo(() => {
+                return products.filter(item => {
+                    const matchCategory = selectedCategory === 'all' || item.category === selectedCategory;
+                    const matchSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                        item.name_so.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                        item.description.toLowerCase().includes(searchQuery.toLowerCase());
+                    return matchCategory && matchSearch;
+                });
+            }, [products, selectedCategory, searchQuery]);
+
+            // Cart Calculations
+            const cartSubtotal = useMemo(() => {
+                return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            }, [cart]);
+
+            const cartTax = cartSubtotal * 0.05; // 5% tax
+            const cartDeliveryFee = orderType === 'delivery' ? 1.50 : 0.00;
+            const cartGrandTotal = cartSubtotal + cartTax + cartDeliveryFee;
+            const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+            // Open Customize Modal
+            const handleOpenCustomize = (product) => {
+                playBeep(700, 0.05);
+                setCustomizingItem(product);
+                setSelectedAddons([]);
+                setItemNotes('');
+            };
+
+            // Toggle Addon
+            const toggleAddon = (addon) => {
+                playBeep(850, 0.04);
+                if (selectedAddons.some(a => a.name === addon.name)) {
+                    setSelectedAddons(selectedAddons.filter(a => a.name !== addon.name));
+                } else {
+                    setSelectedAddons([...selectedAddons, addon]);
+                }
+            };
+
+            // Add Custom Item to Cart
+            const handleAddCustomizedToCart = () => {
+                if (!customizingItem) return;
+                playBeep(900, 0.08);
+
+                const addonsPrice = selectedAddons.reduce((sum, a) => sum + a.price, 0);
+                const finalUnitPrice = customizingItem.price + addonsPrice;
+
+                const cartItem = {
+                    cartId: Date.now() + Math.random(),
+                    id: customizingItem.id,
+                    name: customizingItem.name,
+                    name_so: customizingItem.name_so,
+                    price: finalUnitPrice,
+                    basePrice: customizingItem.price,
+                    quantity: 1,
+                    image: customizingItem.image,
+                    addons: selectedAddons.map(a => a.name_so || a.name),
+                    notes: itemNotes
+                };
+
+                setCart([...cart, cartItem]);
+                setCustomizingItem(null);
+                setIsCartOpen(true);
+            };
+
+            // Quick Add to Cart
+            const handleQuickAddToCart = (product, e) => {
+                e.stopPropagation();
+                playBeep(800, 0.06);
+                
+                const existingIndex = cart.findIndex(i => i.id === product.id && (!i.addons || i.addons.length === 0));
+                if (existingIndex > -1) {
+                    const newCart = [...cart];
+                    newCart[existingIndex].quantity += 1;
+                    setCart(newCart);
+                } else {
+                    setCart([...cart, {
+                        cartId: Date.now() + Math.random(),
+                        id: product.id,
+                        name: product.name,
+                        name_so: product.name_so,
+                        price: product.price,
+                        basePrice: product.price,
+                        quantity: 1,
+                        image: product.image,
+                        addons: [],
+                        notes: ''
+                    }]);
+                }
+            };
+
+            // Update Cart Item Quantity
+            const updateCartQuantity = (cartId, delta) => {
+                playBeep(650, 0.04);
+                setCart(prev => prev.map(item => {
+                    if (item.cartId === cartId) {
+                        const newQty = item.quantity + delta;
+                        return newQty > 0 ? { ...item, quantity: newQty } : null;
+                    }
+                    return item;
+                }).filter(Boolean));
+            };
+
+            // Remove Cart Item
+            const removeCartItem = (cartId) => {
+                playBeep(400, 0.08);
+                setCart(cart.filter(item => item.cartId !== cartId));
+            };
+
+            // Checkout Submission
+            const handlePlaceOrder = () => {
+                if (!customerName.trim()) {
+                    alert(lang === 'so' ? 'Fadlan geli magacaaga!' : 'Please enter your name!');
+                    return;
+                }
+                if (!customerPhone.trim()) {
+                    alert(lang === 'so' ? 'Fadlan geli lambarkaaga taleefanka!' : 'Please enter your phone number!');
+                    return;
+                }
+                if (orderType === 'delivery' && !deliveryAddress.trim()) {
+                    alert(lang === 'so' ? 'Fadlan geli goobta laguu keenayo (Address)!' : 'Please enter delivery address!');
+                    return;
+                }
+
+                setIsSubmitting(true);
+                playOrderSuccessSound();
+
+                setTimeout(() => {
+                    const newOrder = {
+                        id: 'ORD-' + Math.floor(1000 + Math.random() * 9000),
+                        customerName,
+                        phone: customerPhone,
+                        orderType,
+                        tableNumber: orderType === 'dine_in' ? tableNumber : '',
+                        deliveryAddress: orderType === 'delivery' ? deliveryAddress : '',
+                        items: [...cart],
+                        subtotal: cartSubtotal,
+                        tax: cartTax,
+                        deliveryFee: cartDeliveryFee,
+                        total: cartGrandTotal,
+                        paymentMethod,
+                        status: 'cooking',
+                        notes: orderNote,
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        date: new Date().toLocaleDateString('so-SO')
+                    };
+
+                    setOrders([newOrder, ...orders]);
+                    setCart([]);
+                    setIsSubmitting(false);
+                    setIsCartOpen(false);
+                    setReceiptOrder(newOrder); // Open receipt modal
+                }, 700);
+            };
+
+            // Kitchen Status Update
+            const handleUpdateOrderStatus = (orderId, newStatus) => {
+                playBeep(750, 0.06);
+                setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+            };
+
+            // Stats Calculations
+            const stats = useMemo(() => {
+                const totalRev = orders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.total : 0), 0);
+                const activeCount = orders.filter(o => o.status === 'cooking' || o.status === 'pending').length;
+                const completedCount = orders.filter(o => o.status === 'completed').length;
+                return {
+                    revenue: totalRev,
+                    active: activeCount,
+                    completed: completedCount,
+                    totalOrders: orders.length
+                };
+            }, [orders]);
+
+            return (
+                <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+                    
+                    {/* TOP NAVBAR */}
+                    <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-xl">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex items-center justify-between h-20">
+                                
+                                {/* Logo & Brand */}
+                                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('menu')}>
+                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/20 text-2xl font-black ring-2 ring-orange-400/40 transform hover:rotate-6 transition">
+                                        🍔
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-orange-400 via-amber-300 to-orange-500 bg-clip-text text-transparent">
+                                                GANAAN BURGER
+                                            </span>
+                                            <span className="px-2 py-0.5 text-[10px] font-bold bg-orange-500/20 text-orange-400 rounded-full border border-orange-500/30">
+                                                FAST FOOD
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 font-medium">
+                                            {lang === 'so' ? 'Dhadhanka Dhabta Ah ee Muqayadda' : 'Taste the Authentic Fast Food'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Navigation Tabs */}
+                                <nav className="hidden md:flex items-center space-x-1 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700/60">
+                                    <button 
+                                        onClick={() => { playBeep(500, 0.04); setActiveTab('menu'); }}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'menu' ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'}`}>
+                                        <span>🛍️</span>
+                                        <span>{lang === 'so' ? 'Menu-ga & Dalbo' : 'Menu & Order'}</span>
+                                    </button>
+
+                                    <button 
+                                        onClick={() => { playBeep(500, 0.04); setActiveTab('kitchen'); }}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition relative ${activeTab === 'kitchen' ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'}`}>
+                                        <span>👨‍🍳</span>
+                                        <span>{lang === 'so' ? 'Kushiinka (KDS)' : 'Kitchen Screen'}</span>
+                                        {stats.active > 0 && (
+                                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold animate-pulse">
+                                                {stats.active}
+                                            </span>
+                                        )}
+                                    </button>
+
+                                    <button 
+                                        onClick={() => { playBeep(500, 0.04); setActiveTab('admin'); }}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'admin' ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'}`}>
+                                        <span>📊</span>
+                                        <span>{lang === 'so' ? 'Warbixin & Maamul' : 'Analytics & Admin'}</span>
+                                    </button>
+
+                                    <button 
+                                        onClick={() => { playBeep(500, 0.04); setActiveTab('database'); }}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'database' ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'}`}>
+                                        <span>💾</span>
+                                        <span>MySQL Info</span>
+                                    </button>
+                                </nav>
+
+                                {/* Action Controls (Currency, Lang, Cart Button) */}
+                                <div className="flex items-center gap-3">
+                                    
+                                    {/* Currency Switcher */}
+                                    <button 
+                                        onClick={() => {
+                                            playBeep(600, 0.03);
+                                            setCurrency(currency === 'USD' ? 'SOS' : 'USD');
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold text-amber-400 hover:bg-slate-700 transition"
+                                        title="Bedel Lacagta (USD / SOS)">
+                                        {currency === 'USD' ? '$ USD' : '🇸🇴 SOS'}
+                                    </button>
+
+                                    {/* Language Switcher */}
+                                    <button 
+                                        onClick={() => {
+                                            playBeep(600, 0.03);
+                                            setLang(lang === 'so' ? 'en' : 'so');
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300 hover:bg-slate-700 transition">
+                                        {lang === 'so' ? '🇸🇴 SO' : '🇬🇧 EN'}
+                                    </button>
+
+                                    {/* Shopping Cart Button */}
+                                    <button 
+                                        onClick={() => {
+                                            playBeep(700, 0.05);
+                                            setIsCartOpen(true);
+                                        }}
+                                        className="relative flex items-center gap-2.5 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold rounded-xl shadow-lg shadow-orange-500/25 transition transform active:scale-95">
+                                        <span className="text-lg">🛒</span>
+                                        <span className="hidden sm:inline text-sm">
+                                            {formatPrice(cartSubtotal)}
+                                        </span>
+                                        {cartItemCount > 0 && (
+                                            <span className="bg-white text-orange-600 text-xs font-black px-2 py-0.5 rounded-full shadow-inner animate-bounce">
+                                                {cartItemCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Mobile Navigation bar */}
+                            <div className="flex md:hidden overflow-x-auto py-2 gap-2 border-t border-slate-800 scrollbar-none">
+                                <button 
+                                    onClick={() => setActiveTab('menu')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'menu' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                                    🛍️ {lang === 'so' ? 'Menu-ga' : 'Menu'}
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('kitchen')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'kitchen' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                                    👨‍🍳 {lang === 'so' ? 'Kushiinka' : 'Kitchen'} ({stats.active})
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('admin')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'admin' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                                    📊 {lang === 'so' ? 'Maamulka' : 'Admin'}
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('database')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${activeTab === 'database' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                                    💾 MySQL
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* MAIN CONTENT AREA */}
+                    <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+                        {/* ============================================================ */}
+                        {/* TAB 1: MENU & ORDERING CATALOG */}
+                        {/* ============================================================ */}
+                        {activeTab === 'menu' && (
+                            <div className="space-y-8">
+                                
+                                {/* HERO BANNER */}
+                                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-orange-950 via-slate-900 to-slate-900 border border-orange-500/20 shadow-2xl p-6 sm:p-10">
+                                    <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 rounded-full bg-orange-600/10 blur-3xl pointer-events-none"></div>
+                                    <div className="relative z-10 max-w-2xl space-y-4">
+                                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-bold tracking-wide uppercase">
+                                            🔥 {lang === 'so' ? 'Muqayadda #1 Ee Muqdisho' : '#1 Fast Food in Mogadishu'}
+                                        </div>
+                                        <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white leading-tight">
+                                            {lang === 'so' ? 'Burger Macaan, Shuwarmo Diirran & Casiir Dabiici Ah' : 'Juicy Burgers, Warm Shawarma & Fresh Cold Drinks'}
+                                        </h1>
+                                        <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+                                            {lang === 'so' 
+                                                ? 'Ku raaxayso hilibka lo\'ada Angus ee la shiilay, shuwarmada carafta badan, iyo cabitaannada barafka leh. Dalbo hadda oo ku cun goobta ama guriga ha lagugu keeno!'
+                                                : 'Savor gourmet Angus beef patties, slow-roasted fragrant shawarmas, and freshly blended tropical smoothies. Fast delivery right to your door!'}
+                                        </p>
+                                        
+                                        <div className="flex flex-wrap gap-4 pt-2">
+                                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+                                                <span>⚡</span> {lang === 'so' ? 'Diyaarinta: 10-15 daqiiqo' : 'Prep Time: 10-15 mins'}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+                                                <span>🛵</span> {lang === 'so' ? 'Geynta Guriga: EVC Plus & Zaad' : 'Fast Delivery & Mobile Pay'}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs font-semibold text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/30">
+                                                <span>⭐</span> 4.9 (1,450+ Dalab)
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* SEARCH & CATEGORY BAR */}
+                                <div className="space-y-4">
+                                    <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                                        
+                                        {/* Category Pills */}
+                                        <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 scrollbar-none">
+                                            {INITIAL_CATEGORIES.map(cat => (
+                                                <button
+                                                    key={cat.id}
+                                                    onClick={() => {
+                                                        playBeep(600, 0.03);
+                                                        setSelectedCategory(cat.id);
+                                                    }}
+                                                    className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 ${
+                                                        selectedCategory === cat.id 
+                                                            ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-lg shadow-orange-500/20 scale-105' 
+                                                            : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/80'
+                                                    }`}>
+                                                    <span className="text-base">{cat.icon}</span>
+                                                    <span>{lang === 'so' ? cat.name_so : cat.name}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Search Input */}
+                                        <div className="relative w-full sm:w-72">
+                                            <input 
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                placeholder={lang === 'so' ? 'Raadi burger, shuwarmo...' : 'Search menu items...'}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition shadow-inner"
+                                            />
+                                            <span className="absolute left-3.5 top-3 text-slate-500">🔍</span>
+                                            {searchQuery && (
+                                                <button 
+                                                    onClick={() => setSearchQuery('')}
+                                                    className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-white">
+                                                    ✕
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* PRODUCT GRID */}
+                                {filteredProducts.length === 0 ? (
+                                    <div className="text-center py-20 bg-slate-900/40 rounded-3xl border border-dashed border-slate-800">
+                                        <div className="text-5xl mb-3">🍽️</div>
+                                        <h3 className="text-lg font-bold text-slate-300">
+                                            {lang === 'so' ? 'Wax cunto ah lama helin' : 'No items matched your search'}
+                                        </h3>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                            {lang === 'so' ? 'Fadlan ku celi raadinta magac kale.' : 'Try adjusting your search keywords.'}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                        {filteredProducts.map(product => (
+                                            <div 
+                                                key={product.id}
+                                                className="food-card-hover group bg-slate-900/90 rounded-3xl border border-slate-800/80 overflow-hidden flex flex-col justify-between shadow-xl">
+                                                
+                                                {/* Card Header & Image */}
+                                                <div>
+                                                    <div className="relative h-48 w-full overflow-hidden bg-slate-800">
+                                                        <img 
+                                                            src={product.image} 
+                                                            alt={product.name} 
+                                                            className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                                                            loading="lazy"
+                                                        />
+                                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent"></div>
+
+                                                        {/* Badge */}
+                                                        {product.badge && (
+                                                            <span className="absolute top-3 left-3 bg-orange-600/90 backdrop-blur-md text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-full shadow-lg border border-orange-400/30 tracking-wider">
+                                                                {product.badge}
+                                                            </span>
+                                                        )}
+
+                                                        {/* Rating & Prep time */}
+                                                        <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                                                            <span className="bg-slate-900/80 backdrop-blur-md text-amber-400 text-xs font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border border-slate-700">
+                                                                ⭐ {product.rating}
+                                                            </span>
+                                                            <span className="bg-slate-900/80 backdrop-blur-md text-slate-300 text-xs font-medium px-2 py-0.5 rounded-lg border border-slate-700">
+                                                                ⏱️ {product.prepTime}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Card Content */}
+                                                    <div className="p-5 space-y-2">
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <h3 className="font-bold text-base text-white group-hover:text-orange-400 transition leading-snug">
+                                                                {lang === 'so' ? product.name_so : product.name}
+                                                            </h3>
+                                                        </div>
+
+                                                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                                            {lang === 'so' ? product.description_so : product.description}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Card Footer (Price & Actions) */}
+                                                <div className="p-5 pt-0">
+                                                    <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
+                                                        <div>
+                                                            <span className="text-xs text-slate-500 block font-medium">
+                                                                {lang === 'so' ? 'Qiimaha' : 'Price'}
+                                                            </span>
+                                                            <span className="text-xl font-black text-amber-400">
+                                                                {formatPrice(product.price)}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-2">
+                                                            {product.addons && product.addons.length > 0 && (
+                                                                <button 
+                                                                    onClick={() => handleOpenCustomize(product)}
+                                                                    title={lang === 'so' ? 'Dooro Dheeraad' : 'Customize'}
+                                                                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+                                                                    ⚙️
+                                                                </button>
+                                                            )}
+                                                            <button 
+                                                                onClick={(e) => handleQuickAddToCart(product, e)}
+                                                                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs shadow-md shadow-orange-600/30 transition transform active:scale-95">
+                                                                <span>+</span>
+                                                                <span>{lang === 'so' ? 'Ku dar' : 'Add'}</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ============================================================ */}
+                        {/* TAB 2: KITCHEN DISPLAY SYSTEM (KDS) */}
+                        {/* ============================================================ */}
+                        {activeTab === 'kitchen' && (
+                            <div className="space-y-6">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 p-6 rounded-3xl border border-slate-800">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl">👨‍🍳</span>
+                                            <h2 className="text-2xl font-black text-white">
+                                                {lang === 'so' ? 'Shaashadda Kushiinka (Live Kitchen Screen)' : 'Live Kitchen Display Screen (KDS)'}
+                                            </h2>
+                                        </div>
+                                        <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                                            {lang === 'so' 
+                                                ? 'Halkan waxaad si toos ah ugala socon kartaa dalabyada kushiinka soo gala, una cusbooneysiin kartaa marxaladaha diyaarinta.'
+                                                : 'Real-time order tracker for kitchen staff. Update status as food is prepared.'}
+                                        </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <span className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+                                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                                            {lang === 'so' ? 'Toos u Shaqeynaya' : 'Live Connected'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Kanban Columns */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    
+                                    {/* 1. Cooking / In Prep */}
+                                    <div className="bg-slate-900/80 rounded-3xl p-5 border border-amber-500/30 flex flex-col h-[700px]">
+                                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                                                <h3 className="font-black text-amber-400 text-sm tracking-wide uppercase">
+                                                    🍳 {lang === 'so' ? 'Kushiinka Ku Jira' : 'Preparing / Cooking'}
+                                                </h3>
+                                            </div>
+                                            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs font-bold">
+                                                {orders.filter(o => o.status === 'cooking').length}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto space-y-4 pt-4 pr-1">
+                                            {orders.filter(o => o.status === 'cooking').map(order => (
+                                                <div key={order.id} className="bg-slate-800/90 rounded-2xl p-4 border border-slate-700/80 shadow-lg space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="font-extrabold text-white text-sm bg-orange-600/30 text-orange-400 px-2 py-0.5 rounded border border-orange-500/30">
+                                                            #{order.id}
+                                                        </span>
+                                                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                                                            ⏱️ {order.time}
+                                                        </span>
+                                                    </div>
+
+                                                    <div>
+                                                        <h4 className="font-bold text-sm text-slate-100">{order.customerName}</h4>
+                                                        <span className="text-[11px] text-slate-400 block">
+                                                            {order.orderType === 'dine_in' ? `🍽️ ${order.tableNumber}` : order.orderType === 'takeaway' ? '🛍️ Horay u qaado' : `🛵 Delivery (${order.deliveryAddress})`}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Items list */}
+                                                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 space-y-2">
+                                                        {order.items.map((item, idx) => (
+                                                            <div key={idx} className="flex justify-between items-start text-xs border-b border-slate-800/60 pb-1.5 last:border-none last:pb-0">
+                                                                <div>
+                                                                    <span className="font-bold text-white mr-1.5">{item.quantity}x</span>
+                                                                    <span className="text-slate-200">{item.name_so || item.name}</span>
+                                                                    {item.addons && item.addons.length > 0 && (
+                                                                        <span className="block text-[10px] text-amber-400/90 pl-4">
+                                                                            + {item.addons.join(', ')}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    {order.notes && (
+                                                        <div className="text-[11px] text-amber-300 bg-amber-950/40 p-2 rounded-lg border border-amber-800/40">
+                                                            💬 {order.notes}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Actions */}
+                                                    <div className="pt-2 flex gap-2">
+                                                        <button 
+                                                            onClick={() => handleUpdateOrderStatus(order.id, 'ready')}
+                                                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20">
+                                                            ✓ {lang === 'so' ? 'Waa Diyaar!' : 'Mark as Ready'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {orders.filter(o => o.status === 'cooking').length === 0 && (
+                                                <div className="text-center py-20 text-xs text-slate-500">
+                                                    Kushiinku hadda wuu bannaan yahay 🍔
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 2. Ready for pickup / delivery */}
+                                    <div className="bg-slate-900/80 rounded-3xl p-5 border border-emerald-500/30 flex flex-col h-[700px]">
+                                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
+                                                <h3 className="font-black text-emerald-400 text-sm tracking-wide uppercase">
+                                                    🔔 {lang === 'so' ? 'Waa Diyaar (Qaado/Gey)' : 'Ready for Pickup'}
+                                                </h3>
+                                            </div>
+                                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold">
+                                                {orders.filter(o => o.status === 'ready').length}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto space-y-4 pt-4 pr-1">
+                                            {orders.filter(o => o.status === 'ready').map(order => (
+                                                <div key={order.id} className="bg-slate-800/90 rounded-2xl p-4 border border-emerald-700/50 shadow-lg space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="font-extrabold text-white text-sm bg-emerald-600/30 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30">
+                                                            #{order.id}
+                                                        </span>
+                                                        <button 
+                                                            onClick={() => setReceiptOrder(order)}
+                                                            className="text-xs text-slate-400 hover:text-white underline">
+                                                            🖨️ {lang === 'so' ? 'Rasiid' : 'Receipt'}
+                                                        </button>
+                                                    </div>
+
+                                                    <div>
+                                                        <h4 className="font-bold text-sm text-slate-100">{order.customerName}</h4>
+                                                        <span className="text-[11px] text-slate-400 block">📞 {order.phone}</span>
+                                                        <span className="text-[11px] text-emerald-300 font-semibold block mt-0.5">
+                                                            {order.orderType === 'dine_in' ? `🍽️ ${order.tableNumber}` : order.orderType === 'takeaway' ? '🛍️ Horay u qaado' : `🛵 Delivery (${order.deliveryAddress})`}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 text-xs space-y-1 text-slate-300">
+                                                        {order.items.map((i, idx) => (
+                                                            <div key={idx} className="flex justify-between">
+                                                                <span>{i.quantity}x {i.name_so || i.name}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <button 
+                                                        onClick={() => handleUpdateOrderStatus(order.id, 'completed')}
+                                                        className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-bold transition">
+                                                        🏁 {lang === 'so' ? 'Dhammeystir (La Bixiyay)' : 'Complete & Close'}
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 3. Completed Orders */}
+                                    <div className="bg-slate-900/80 rounded-3xl p-5 border border-slate-800 flex flex-col h-[700px]">
+                                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-3 h-3 rounded-full bg-slate-500"></span>
+                                                <h3 className="font-black text-slate-400 text-sm tracking-wide uppercase">
+                                                    ✅ {lang === 'so' ? 'La Bixiyay (Dhammeystiran)' : 'Completed Orders'}
+                                                </h3>
+                                            </div>
+                                            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-xs font-bold">
+                                                {orders.filter(o => o.status === 'completed').length}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto space-y-3 pt-4 pr-1">
+                                            {orders.filter(o => o.status === 'completed').map(order => (
+                                                <div key={order.id} className="bg-slate-800/40 rounded-2xl p-3 border border-slate-800 space-y-2 text-xs">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-bold text-slate-400">#{order.id}</span>
+                                                        <span className="font-black text-emerald-400">{formatPrice(order.total)}</span>
+                                                    </div>
+                                                    <div className="text-slate-300 flex justify-between">
+                                                        <span>{order.customerName}</span>
+                                                        <span className="text-[10px] text-slate-500">{order.time}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                                                        <span className="text-[10px] text-slate-500 font-mono">{order.paymentMethod}</span>
+                                                        <button 
+                                                            onClick={() => setReceiptOrder(order)}
+                                                            className="text-[10px] text-orange-400 hover:underline">
+                                                            Daabac Rasiid
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ============================================================ */}
+                        {/* TAB 3: ADMIN DASHBOARD & MENU MANAGER */}
+                        {/* ============================================================ */}
+                        {activeTab === 'admin' && (
+                            <div className="space-y-8">
+                                
+                                {/* Analytics Cards */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                                    <div className="bg-gradient-to-br from-orange-600/20 to-slate-900 border border-orange-500/30 p-6 rounded-3xl shadow-xl">
+                                        <span className="text-xs font-bold text-orange-400 uppercase tracking-wider block">
+                                            {lang === 'so' ? 'Wadarta Dakhliga' : 'Total Revenue'}
+                                        </span>
+                                        <div className="text-3xl font-black text-white mt-2">
+                                            {formatPrice(stats.revenue)}
+                                        </div>
+                                        <span className="text-xs text-slate-400 mt-1 block">
+                                            {orders.length} {lang === 'so' ? 'dalab oo guud ahaan la qabtay' : 'total orders handled'}
+                                        </span>
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl">
+                                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block">
+                                            {lang === 'so' ? 'Dalabyada Kushiinka' : 'Active Orders'}
+                                        </span>
+                                        <div className="text-3xl font-black text-white mt-2">
+                                            {stats.active}
+                                        </div>
+                                        <span className="text-xs text-slate-400 mt-1 block">
+                                            {lang === 'so' ? 'Kushiinka ku jira hadda' : 'Currently in preparation'}
+                                        </span>
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl">
+                                        <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block">
+                                            {lang === 'so' ? 'Dalabyada La Bixiyay' : 'Completed Orders'}
+                                        </span>
+                                        <div className="text-3xl font-black text-white mt-2">
+                                            {stats.completed}
+                                        </div>
+                                        <span className="text-xs text-slate-400 mt-1 block">
+                                            {lang === 'so' ? 'Si guul leh loo gaarsiiyay' : 'Delivered successfully'}
+                                        </span>
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl">
+                                        <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
+                                            {lang === 'so' ? 'Isku Celceliska Dalabka' : 'Avg Order Value'}
+                                        </span>
+                                        <div className="text-3xl font-black text-white mt-2">
+                                            {formatPrice(orders.length > 0 ? (stats.revenue / orders.length) : 0)}
+                                        </div>
+                                        <span className="text-xs text-slate-400 mt-1 block">
+                                            {lang === 'so' ? 'Celcelis macmiilkiiba' : 'Per customer average'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Menu Items Table / Manager */}
+                                <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-4">
+                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white">
+                                                {lang === 'so' ? 'Maamulka Cuntooyinka (Menu Manager)' : 'Menu Catalog Management'}
+                                            </h3>
+                                            <p className="text-xs text-slate-400">
+                                                {lang === 'so' ? 'Kudar cunto cusub, bedel qiimaha ama tirtir.' : 'Manage burgers, shawarma, and drink prices.'}
+                                            </p>
+                                        </div>
+
+                                        <button 
+                                            onClick={() => {
+                                                const name = prompt(lang === 'so' ? 'Magaca Cuntada (English):' : 'Product Name (English):', 'Crispy Falafel Roll');
+                                                if (!name) return;
+                                                const name_so = prompt(lang === 'so' ? 'Magaca Cuntada (Af-Soomaali):' : 'Product Name (Somali):', 'Falafel Carabi Roll');
+                                                const price = parseFloat(prompt(lang === 'so' ? 'Qiimaha ($ USD):' : 'Price ($ USD):', '3.50')) || 3.50;
+                                                const category = prompt('Category (burgers, shawarma, drinks, sides):', 'shawarma');
+
+                                                const newItem = {
+                                                    id: Date.now(),
+                                                    category: category || 'burgers',
+                                                    name: name,
+                                                    name_so: name_so || name,
+                                                    description: 'Delicious fast food item made fresh at Ganaan Burger.',
+                                                    description_so: 'Cunto macaan oo cusub oo lagu diyaariyay Ganaan Burger.',
+                                                    price: price,
+                                                    rating: 5.0,
+                                                    badge: 'NEW',
+                                                    calories: 450,
+                                                    prepTime: '10 daqiiqo',
+                                                    image: 'https://images.unsplash.com/photo-1561651823-34feb02250e4?auto=format&fit=crop&w=800&q=80',
+                                                    addons: []
+                                                };
+
+                                                setProducts([newItem, ...products]);
+                                                alert(lang === 'so' ? 'Cuntada cusub waa lagu daray!' : 'New product successfully added!');
+                                            }}
+                                            className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-600/30">
+                                            <span>+</span>
+                                            <span>{lang === 'so' ? 'Ku dar Cunto Cusub' : 'Add New Product'}</span>
+                                        </button>
+                                    </div>
+
+                                    {/* Products Table */}
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs text-slate-300">
+                                            <thead className="bg-slate-800 text-slate-400 uppercase font-semibold">
+                                                <tr>
+                                                    <th className="p-3 rounded-l-xl">Cunto</th>
+                                                    <th className="p-3">Qeybta</th>
+                                                    <th className="p-3">Qiimaha ($)</th>
+                                                    <th className="p-3">Qiimaha (SOS)</th>
+                                                    <th className="p-3">Diyaarin</th>
+                                                    <th className="p-3 rounded-r-xl text-right">Hawlgal</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800">
+                                                {products.map(item => (
+                                                    <tr key={item.id} className="hover:bg-slate-800/40 transition">
+                                                        <td className="p-3 flex items-center gap-3">
+                                                            <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
+                                                            <div>
+                                                                <span className="font-bold text-white block">{item.name_so}</span>
+                                                                <span className="text-[10px] text-slate-400">{item.name}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-orange-400 font-medium uppercase text-[10px]">
+                                                                {item.category}
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-3 font-bold text-amber-400">${item.price.toFixed(2)}</td>
+                                                        <td className="p-3 font-medium text-slate-400">{(item.price * 26000).toLocaleString()} SOS</td>
+                                                        <td className="p-3">{item.prepTime}</td>
+                                                        <td className="p-3 text-right">
+                                                            <button 
+                                                                onClick={() => {
+                                                                    const newPrice = parseFloat(prompt(lang === 'so' ? `Geli qiimaha cusub ee (${item.name_so}):` : 'Enter new price:', item.price));
+                                                                    if (!isNaN(newPrice) && newPrice > 0) {
+                                                                        setProducts(products.map(p => p.id === item.id ? { ...p, price: newPrice } : p));
+                                                                    }
+                                                                }}
+                                                                className="text-amber-400 hover:text-amber-300 font-bold mr-3">
+                                                                Qiimo Bedel
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => {
+                                                                    if (confirm(lang === 'so' ? `Ma hubtaa inaad tirtirto (${item.name_so})?` : `Delete ${item.name}?`)) {
+                                                                        setProducts(products.filter(p => p.id !== item.id));
+                                                                    }
+                                                                }}
+                                                                className="text-red-400 hover:text-red-300">
+                                                                Tirtir
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ============================================================ */}
+                        {/* TAB 4: DATABASE & MYSQL EXPORT */}
+                        {/* ============================================================ */}
+                        {activeTab === 'database' && (
+                            <div className="space-y-6">
+                                <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-2xl">🐬</span>
+                                                <h2 className="text-2xl font-black text-white">
+                                                    MySQL Database Schema & SQL Scripts
+                                                </h2>
+                                            </div>
+                                            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                                                {lang === 'so' 
+                                                    ? 'Database-ka nidaamkan waxaa loogu talagalay MySQL / MariaDB. Waxaad ku shuban kartaa phpMyAdmin ama MySQL Workbench.'
+                                                    : 'Relational MySQL schema ready to import into phpMyAdmin, MySQL Workbench, or via terminal.'}
+                                            </p>
+                                        </div>
+
+                                        <button 
+                                            onClick={() => {
+                                                // Generate SQL export of current orders and products
+                                                let sql = `-- Ganaan Burger System Export\n-- Generated: ${new Date().toISOString()}\n\n`;
+                                                sql += `USE ganaan_burger_db;\n\n`;
+                                                orders.forEach(o => {
+                                                    sql += `INSERT INTO orders (order_number, customer_name, customer_phone, order_type, table_number, total_amount, payment_method, order_status)\n`;
+                                                    sql += `VALUES ('${o.id}', '${o.customerName.replace(/'/g, "''")}', '${o.phone}', '${o.orderType}', '${o.tableNumber}', ${o.total}, '${o.paymentMethod}', '${o.status}');\n`;
+                                                });
+
+                                                const blob = new Blob([sql], { type: 'text/sql' });
+                                                const url = URL.createObjectURL(blob);
+                                                const a = document.createElement('a');
+                                                a.href = url;
+                                                a.download = `ganaan_burger_orders_${Date.now()}.sql`;
+                                                a.click();
+                                            }}
+                                            className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-600/30">
+                                            <span>📥</span>
+                                            <span>{lang === 'so' ? 'Daji SQL Dalabyada (.sql)' : 'Download SQL Export'}</span>
+                                        </button>
+                                    </div>
+
+                                    {/* SQL Code Block */}
+                                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto space-y-1">
+                                        <div className="text-slate-500">// 1. Database Creation</div>
+                                        <div>CREATE DATABASE IF NOT EXISTS `ganaan_burger_db` DEFAULT CHARACTER SET utf8mb4;</div>
+                                        <div>USE `ganaan_burger_db`;</div>
+                                        <br/>
+                                        <div className="text-slate-500">// 2. Tables & Relations</div>
+                                        <div className="text-cyan-300">TABLE categories: (id, name, name_so, slug, icon, is_active)</div>
+                                        <div className="text-cyan-300">TABLE products: (id, category_id, name, name_so, description, price, image_url, is_available)</div>
+                                        <div className="text-cyan-300">TABLE orders: (id, order_number, customer_name, customer_phone, order_type, table_number, total_amount, payment_method, order_status)</div>
+                                        <div className="text-cyan-300">TABLE order_items: (id, order_id, product_id, product_name, price, quantity, subtotal)</div>
+                                        <div className="text-cyan-300">TABLE product_addons: (id, product_id, name, price)</div>
+                                    </div>
+
+                                    <div className="p-4 bg-orange-950/20 border border-orange-500/30 rounded-2xl text-xs text-orange-300 leading-relaxed">
+                                        💡 <strong>Sida loo bilaabo Backend-ka Node.js & MySQL:</strong><br/>
+                                        1. Gal galka mashruuca: <code className="bg-slate-900 px-1 py-0.5 rounded text-white">cd c:\Users\HP\Documents\Ganaan-Burger-System</code><br/>
+                                        2. Ku shub database-ka MySQL: <code className="bg-slate-900 px-1 py-0.5 rounded text-white">mysql -u root -p &lt; database.sql</code><br/>
+                                        3. Bilow server-ka Express: <code className="bg-slate-900 px-1 py-0.5 rounded text-white">npm install && npm start</code>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                    </main>
+
+                    {/* ============================================================ */}
+                    {/* CUSTOMIZE MODAL (Addons & Notes) */}
+                    {/* ============================================================ */}
+                    {customizingItem && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+                            <div className="bg-slate-900 rounded-3xl border border-slate-700 w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                                
+                                {/* Image & Header */}
+                                <div className="relative h-48 w-full bg-slate-800">
+                                    <img src={customizingItem.image} alt={customizingItem.name} className="w-full h-full object-cover" />
+                                    <button 
+                                        onClick={() => setCustomizingItem(null)}
+                                        className="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-900/80 text-white flex items-center justify-center hover:bg-slate-800 transition">
+                                        ✕
+                                    </button>
+                                    <div className="absolute bottom-3 left-4">
+                                        <span className="text-2xl font-black text-white drop-shadow-md">
+                                            {lang === 'so' ? customizingItem.name_so : customizingItem.name}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Body */}
+                                <div className="p-6 space-y-5 overflow-y-auto flex-1">
+                                    <div>
+                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                                            {lang === 'so' ? 'Waxyaabo Dheeraad ah (Add-ons)' : 'Custom Add-ons'}
+                                        </h4>
+                                        <div className="space-y-2">
+                                            {customizingItem.addons && customizingItem.addons.map((addon, index) => {
+                                                const isSelected = selectedAddons.some(a => a.name === addon.name);
+                                                return (
+                                                    <div 
+                                                        key={index}
+                                                        onClick={() => toggleAddon(addon)}
+                                                        className={`flex items-center justify-between p-3.5 rounded-2xl border cursor-pointer transition ${
+                                                            isSelected 
+                                                                ? 'bg-orange-500/20 border-orange-500 text-white' 
+                                                                : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                                                        }`}>
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-5 h-5 rounded-md flex items-center justify-center border ${isSelected ? 'bg-orange-500 border-orange-500 text-white' : 'border-slate-600'}`}>
+                                                                {isSelected && '✓'}
+                                                            </div>
+                                                            <span className="text-xs font-semibold">{lang === 'so' ? (addon.name_so || addon.name) : addon.name}</span>
+                                                        </div>
+                                                        <span className="text-xs font-bold text-amber-400">+{formatPrice(addon.price)}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                                            {lang === 'so' ? 'Fariin Gaar ah (Special Instructions)' : 'Special Requests'}
+                                        </label>
+                                        <input 
+                                            type="text"
+                                            value={itemNotes}
+                                            onChange={(e) => setItemNotes(e.target.value)}
+                                            placeholder={lang === 'so' ? 'Tusaale: Basbaaska ha ku badinina, toom dheeraad ah...' : 'e.g., No onion, extra spicy sauce...'}
+                                            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-orange-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Modal Footer */}
+                                <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+                                    <div>
+                                        <span className="text-[11px] text-slate-500 block">Wadarta Guud</span>
+                                        <span className="text-xl font-black text-amber-400">
+                                            {formatPrice(customizingItem.price + selectedAddons.reduce((s, a) => s + a.price, 0))}
+                                        </span>
+                                    </div>
+
+                                    <button 
+                                        onClick={handleAddCustomizedToCart}
+                                        className="px-6 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs shadow-lg shadow-orange-600/30 transition">
+                                        {lang === 'so' ? 'Ku Dar Dalabka' : 'Add to Cart'}
+                                    </button>
+                                </div>
+
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ============================================================ */}
+                    {/* CART & CHECKOUT SLIDEOVER DRAWER */}
+                    {/* ============================================================ */}
+                    {isCartOpen && (
+                        <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm animate-fade-in">
+                            <div className="w-full max-w-md bg-slate-900 h-full flex flex-col shadow-2xl border-l border-slate-800">
+                                
+                                {/* Drawer Header */}
+                                <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xl">🛒</span>
+                                        <h3 className="text-lg font-black text-white">
+                                            {lang === 'so' ? 'Gaarigaaga Dalabka' : 'Your Order Cart'}
+                                        </h3>
+                                        <span className="text-xs bg-orange-600/30 text-orange-400 font-bold px-2 py-0.5 rounded-full border border-orange-500/30">
+                                            {cartItemCount}
+                                        </span>
+                                    </div>
+                                    <button 
+                                        onClick={() => setIsCartOpen(false)}
+                                        className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition">
+                                        ✕
+                                    </button>
+                                </div>
+
+                                {/* Items List */}
+                                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                                    {cart.length === 0 ? (
+                                        <div className="text-center py-20 text-slate-500 space-y-2">
+                                            <div className="text-5xl">🍔</div>
+                                            <p className="font-bold text-sm text-slate-400">
+                                                {lang === 'so' ? 'Gaarigu wuu maran yahay!' : 'Your cart is empty!'}
+                                            </p>
+                                            <p className="text-xs">
+                                                {lang === 'so' ? 'Dooro burger, shuwarmo ama cabitaan si aad u dalbato.' : 'Add items from our delicious menu to proceed.'}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        cart.map(item => (
+                                            <div key={item.cartId} className="bg-slate-800/80 rounded-2xl p-3 border border-slate-700/80 flex gap-3 items-center">
+                                                <img src={item.image} alt={item.name} className="w-16 h-16 rounded-xl object-cover shrink-0" />
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="font-bold text-xs text-white truncate">
+                                                        {lang === 'so' ? item.name_so : item.name}
+                                                    </h4>
+                                                    {item.addons && item.addons.length > 0 && (
+                                                        <span className="block text-[10px] text-amber-400/90 truncate">
+                                                            + {item.addons.join(', ')}
+                                                        </span>
+                                                    )}
+                                                    <span className="text-xs font-black text-amber-400 mt-1 block">
+                                                        {formatPrice(item.price * item.quantity)}
+                                                    </span>
+                                                </div>
+
+                                                {/* Quantity Controls */}
+                                                <div className="flex items-center gap-2 bg-slate-900 px-2 py-1 rounded-xl border border-slate-700">
+                                                    <button 
+                                                        onClick={() => updateCartQuantity(item.cartId, -1)}
+                                                        className="w-6 h-6 flex items-center justify-center text-xs font-bold text-slate-300 hover:text-white">
+                                                        -
+                                                    </button>
+                                                    <span className="text-xs font-black text-white">{item.quantity}</span>
+                                                    <button 
+                                                        onClick={() => updateCartQuantity(item.cartId, 1)}
+                                                        className="w-6 h-6 flex items-center justify-center text-xs font-bold text-slate-300 hover:text-white">
+                                                        +
+                                                    </button>
+                                                </div>
+
+                                                <button 
+                                                    onClick={() => removeCartItem(item.cartId)}
+                                                    className="text-xs text-slate-500 hover:text-red-400 p-1">
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+
+                                    {/* Order Type & Customer Details if cart not empty */}
+                                    {cart.length > 0 && (
+                                        <div className="pt-4 border-t border-slate-800 space-y-4">
+                                            
+                                            {/* Order Type */}
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                                                    {lang === 'so' ? 'Nooca Dalabka' : 'Order Service Type'}
+                                                </label>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {[
+                                                        { id: 'dine_in', label: lang === 'so' ? '🍽️ Gudaha' : '🍽️ Dine-In' },
+                                                        { id: 'takeaway', label: lang === 'so' ? '🛍️ Qaadasho' : '🛍️ Takeaway' },
+                                                        { id: 'delivery', label: lang === 'so' ? '🛵 Geynta' : '🛵 Delivery' }
+                                                    ].map(t => (
+                                                        <button 
+                                                            key={t.id}
+                                                            type="button"
+                                                            onClick={() => setOrderType(t.id)}
+                                                            className={`py-2 text-xs font-bold rounded-xl border transition ${orderType === t.id ? 'bg-orange-600 border-orange-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>
+                                                            {t.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Table selection if dine-in */}
+                                            {orderType === 'dine_in' && (
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-400 block mb-1">
+                                                        {lang === 'so' ? 'Lambarka Miiska' : 'Table Number'}
+                                                    </label>
+                                                    <select 
+                                                        value={tableNumber} 
+                                                        onChange={(e) => setTableNumber(e.target.value)}
+                                                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                                                        <option value="Miiska 01">Miiska 01</option>
+                                                        <option value="Miiska 02">Miiska 02</option>
+                                                        <option value="Miiska 03">Miiska 03</option>
+                                                        <option value="Miiska 04">Miiska 04</option>
+                                                        <option value="Miiska 05">Miiska 05</option>
+                                                        <option value="Miiska VIP">Qeybta VIP</option>
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {/* Delivery Address if delivery */}
+                                            {orderType === 'delivery' && (
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-400 block mb-1">
+                                                        {lang === 'so' ? 'Goobta Loo Keenayo (Address)' : 'Delivery Address'}
+                                                    </label>
+                                                    <input 
+                                                        type="text"
+                                                        value={deliveryAddress}
+                                                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                                                        placeholder={lang === 'so' ? 'Tus: KM4, Muqdisho / Dabaqa 2aad' : 'e.g. KM4, Mogadishu'}
+                                                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {/* Customer Name & Phone */}
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-400 block mb-1">
+                                                        {lang === 'so' ? 'Magacaaga' : 'Your Name'}
+                                                    </label>
+                                                    <input 
+                                                        type="text"
+                                                        value={customerName}
+                                                        onChange={(e) => setCustomerName(e.target.value)}
+                                                        placeholder="Magaca"
+                                                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-bold text-slate-400 block mb-1">
+                                                        {lang === 'so' ? 'Taleefanka' : 'Phone Number'}
+                                                    </label>
+                                                    <input 
+                                                        type="text"
+                                                        value={customerPhone}
+                                                        onChange={(e) => setCustomerPhone(e.target.value)}
+                                                        placeholder="061xxxxxxx"
+                                                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Payment Options */}
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                                                    {lang === 'so' ? 'Habka Lacag-Bixinta' : 'Payment Method'}
+                                                </label>
+                                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                                    {[
+                                                        { id: 'EVC_PLUS', label: '🟢 EVC Plus' },
+                                                        { id: 'ZAAD', label: '🟠 Zaad Service' },
+                                                        { id: 'SAHAL', label: '🔴 Sahal Pay' },
+                                                        { id: 'CASH', label: '💵 Lacag Caddaan' }
+                                                    ].map(p => (
+                                                        <button 
+                                                            key={p.id}
+                                                            type="button"
+                                                            onClick={() => setPaymentMethod(p.id)}
+                                                            className={`py-2 px-3 rounded-xl border text-left font-bold transition ${paymentMethod === p.id ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>
+                                                            {p.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Drawer Footer (Checkout Button) */}
+                                {cart.length > 0 && (
+                                    <div className="p-5 bg-slate-950 border-t border-slate-800 space-y-3">
+                                        <div className="space-y-1.5 text-xs text-slate-400">
+                                            <div className="flex justify-between">
+                                                <span>{lang === 'so' ? 'Dakhliga Cuntada' : 'Subtotal'}</span>
+                                                <span className="text-white font-bold">{formatPrice(cartSubtotal)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>{lang === 'so' ? 'Canshuur (5%)' : 'Tax (5%)'}</span>
+                                                <span className="text-white font-bold">{formatPrice(cartTax)}</span>
+                                            </div>
+                                            {orderType === 'delivery' && (
+                                                <div className="flex justify-between text-orange-400">
+                                                    <span>{lang === 'so' ? 'Qiimaha Geynta' : 'Delivery Fee'}</span>
+                                                    <span className="font-bold">{formatPrice(cartDeliveryFee)}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between text-sm pt-2 border-t border-slate-800 font-black text-white">
+                                                <span>{lang === 'so' ? 'Wadarta Guud' : 'Grand Total'}</span>
+                                                <span className="text-amber-400 text-base">{formatPrice(cartGrandTotal)}</span>
+                                            </div>
+                                        </div>
+
+                                        <button 
+                                            onClick={handlePlaceOrder}
+                                            disabled={isSubmitting}
+                                            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-black text-sm shadow-xl shadow-orange-600/30 transition transform active:scale-98 flex items-center justify-center gap-2">
+                                            {isSubmitting ? (
+                                                <span>⏳ Dalabka waa la gudbinayaa...</span>
+                                            ) : (
+                                                <>
+                                                    <span>🚀</span>
+                                                    <span>{lang === 'so' ? 'Xaqiiji Dalabka (Place Order)' : 'Confirm & Place Order'}</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                )}
+
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ============================================================ */}
+                    {/* PRINTABLE RECEIPT MODAL */}
+                    {/* ============================================================ */}
+                    {receiptOrder && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in no-print-bg">
+                            <div className="bg-white text-slate-900 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col">
+                                
+                                {/* Receipt Header */}
+                                <div id="printable-receipt" className="p-6 text-center space-y-3 font-mono text-xs">
+                                    <div className="border-b-2 border-dashed border-slate-300 pb-4">
+                                        <div className="text-2xl font-black tracking-tight text-slate-900">
+                                            🍔 GANAAN BURGER
+                                        </div>
+                                        <p className="text-[11px] text-slate-600 mt-0.5">Fast Food & Shawarma Spot</p>
+                                        <p className="text-[10px] text-slate-500">Maka Al-Mukarama, Muqdisho</p>
+                                        <p className="text-[10px] text-slate-500">Tel: +252 61 5000000</p>
+                                    </div>
+
+                                    {/* Order Meta */}
+                                    <div className="text-left py-2 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Dalabka #:</span>
+                                            <span className="font-bold">{receiptOrder.id}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Taariikhda:</span>
+                                            <span>{receiptOrder.date} - {receiptOrder.time}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Macmiilka:</span>
+                                            <span className="font-bold">{receiptOrder.customerName}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Taleefanka:</span>
+                                            <span>{receiptOrder.phone}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Adeegga:</span>
+                                            <span className="font-bold uppercase">{receiptOrder.orderType}</span>
+                                        </div>
+                                        {receiptOrder.tableNumber && (
+                                            <div className="flex justify-between font-bold text-orange-600">
+                                                <span>Miiska:</span>
+                                                <span>{receiptOrder.tableNumber}</span>
+                                            </div>
+                                        )}
+                                        {receiptOrder.deliveryAddress && (
+                                            <div className="text-[10px] text-slate-600">
+                                                <span>Geynta: {receiptOrder.deliveryAddress}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Items Table */}
+                                    <div className="py-2 border-b-2 border-dashed border-slate-300 space-y-2 text-left">
+                                        {receiptOrder.items.map((it, idx) => (
+                                            <div key={idx} className="flex justify-between text-[11px]">
+                                                <div>
+                                                    <span className="font-bold mr-1">{it.quantity}x</span>
+                                                    <span>{it.name_so || it.name}</span>
+                                                    {it.addons && it.addons.length > 0 && (
+                                                        <div className="text-[9px] text-slate-500 pl-4">
+                                                            + {it.addons.join(', ')}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <span className="font-bold">${(it.price * it.quantity).toFixed(2)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Totals */}
+                                    <div className="pt-2 text-right space-y-1 text-xs">
+                                        <div className="flex justify-between text-slate-600">
+                                            <span>Subtotal:</span>
+                                            <span>${receiptOrder.subtotal.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600">
+                                            <span>Tax (5%):</span>
+                                            <span>${receiptOrder.tax.toFixed(2)}</span>
+                                        </div>
+                                        {receiptOrder.deliveryFee > 0 && (
+                                            <div className="flex justify-between text-slate-600">
+                                                <span>Geynta:</span>
+                                                <span>${receiptOrder.deliveryFee.toFixed(2)}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between text-sm font-black pt-2 border-t border-slate-300 text-slate-900">
+                                            <span>WADARTA (USD):</span>
+                                            <span>${receiptOrder.total.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs font-bold text-slate-700">
+                                            <span>WADARTA (SOS):</span>
+                                            <span>{(receiptOrder.total * 26000).toLocaleString()} SOS</span>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] text-slate-500 pt-1">
+                                            <span>Bixinta:</span>
+                                            <span className="font-bold">{receiptOrder.paymentMethod}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Receipt Footer */}
+                                    <div className="pt-4 text-center border-t border-dashed border-slate-300 space-y-1 text-[10px] text-slate-500">
+                                        <p className="font-bold text-slate-800">MAHADSANID! MAR KALE NAGU SOO LAABTA.</p>
+                                        <p>Cuntada waxaa loo kariyaa si jacayl & nadaafad leh.</p>
+                                        <div className="font-mono text-center tracking-widest text-[9px] pt-1">
+                                            ||| | ||||| || |||||| |||| ||
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Modal Actions */}
+                                <div className="p-4 bg-slate-100 border-t border-slate-200 flex gap-2 no-print">
+                                    <button 
+                                        onClick={() => window.print()}
+                                        className="flex-1 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2">
+                                        <span>🖨️</span>
+                                        <span>Daabac Rasiidka (Print)</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => setReceiptOrder(null)}
+                                        className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition">
+                                        Xir
+                                    </button>
+                                </div>
+
+                            </div>
+                        </div>
+                    )}
+
+                    {/* FOOTER */}
+                    <footer className="bg-slate-950 border-t border-slate-900 py-8 text-center text-xs text-slate-500">
+                        <div className="max-w-7xl mx-auto px-4 space-y-2">
+                            <p className="font-bold text-slate-400">
+                                © 2026 GANAAN BURGER & FAST FOOD RESTAURANT MANAGEMENT SYSTEM
+                            </p>
+                            <p>
+                                Kudhisan React.js 18, Tailwind CSS, Express & MySQL Database • Waxaa loogu talagalay Muqayado Casri ah
+                            </p>
+                        </div>
+                    </footer>
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
